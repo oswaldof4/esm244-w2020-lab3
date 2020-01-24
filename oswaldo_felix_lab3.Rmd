@@ -1,0 +1,155 @@
+---
+title: "oswaldo_felix_lab3"
+author: "Oswaldo Felix"
+date: "1/23/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, 
+                      message = FALSE, 
+                      warning = FALSE)
+library(tidyverse)
+library(janitor)
+library(here)
+library(tmap)
+library(sf)
+```
+
+```{r}
+gentoo <- read_csv("gentoo_lter.csv")
+chinstrap <- read_csv("chinstrap_lter.csv")
+
+penguins <- full_join(chinstrap, gentoo) %>% 
+  clean_names() %>% 
+  mutate(sex = str_to_lower(sex)) %>% 
+  filter(sex %in% c("male", "female")) 
+```
+
+Now let's graph this:
+
+```{r}
+ggplot(data = penguins, aes(x = sex, y = body_mass_g)) +
+  geom_jitter(aes(color = sex, 
+                  pch = sex), show.legend = FALSE) +
+  facet_wrap(~species) +
+  labs(y = "Body Mass [g]", x = "Sex") + 
+  theme_grey()
+```
+
+Code Chinstrap penguins as (1) and Gentoo penguins as (0):
+
+```{r}
+penguin_bin <- penguins %>% 
+  mutate(
+    sp_binary = case_when(
+      species == "Chinstrap penguin (Pygoscelis antarctica)" ~ 1,
+      species == "Gentoo penguin (Pygoscelis papua)" ~ 0
+    )
+  )
+```
+
+Now let's run our binary logistic regression:
+```{r}
+penguin_blr <- glm(sp_binary ~ sex + body_mass_g,
+                   family = binomial,
+                   data = penguin_bin)
+
+#summary(penguin_blr)
+```
+
+Let's make some predictions for penguins (classification... kinda)
+
+1. What is the probablity that a penguin is a Chinstrap penguin if it weighs 4500 grams and is male?
+```{r}
+df_m4500 <- data.frame(sex = "male", body_mass_g = 4500)
+
+
+# Find the log odds of this penguin being Chinstrap:
+logodds_m4500 <- predict(penguin_blr, newdata = df_m4500, type = "link")
+#logodds_m4500
+
+prob_m4500 <- predict(penguin_blr, newdata = df_m4500, type = "response")
+prob_m4500
+```
+
+2. What is the probability that a penguin is Chinstrap, if it is recorded as female of 4000g?
+```{r}
+df_f4000 <- data.frame(sex = "female", body_mass_g = 4000)
+
+prob_f4000 <- predict(penguin_blr, newdata = df_f4000, type = "response")
+prob_f4000
+```
+
+Now let's make an entire data frame and use it to then visulaize logistic regression outcomes:
+
+```{r}
+penguins_mock <- data.frame(
+  body_mass_g = rep(seq(3000, 6000, length = 200), 2),
+  sex = c(rep("male", 200), rep("female", 200))
+)
+```
+
+Now let's use those to make predictions for all of them:
+
+```{r}
+full_predict <- predict(penguin_blr, newdata = penguins_mock, type = "response", se.fit = TRUE)
+
+# Get those into a dta frame, along with the mock data used to create them:
+
+final_df <- data.frame(
+  penguins_mock,
+  full_predict$fit,
+  full_predict$se.fit
+)
+
+colnames(final_df) <- c("penguin_mass", "sex", "probability", "se")
+```
+
+Now let's graph it!
+
+```{r}
+ggplot(data = final_df, aes(x = penguin_mass, y = probability)) +
+  geom_line(aes(color = sex)) +
+  geom_ribbon(aes(ymin = probability - se, 
+                  ymax = probability + se, 
+                  fill = sex),
+              alpha = 0.3)
+```
+
+## NOW some spatial data with sf
+
+Read in the spatial data using read_sf():
+
+```{r}
+cougars <- read_sf(dsn = here("cougar_connections"), layer = "ds1014") %>% 
+  clean_names()
+```
+
+```{r}
+large_corridors <- cougars %>% 
+  filter(area_ac > 20000) %>% 
+  select(area_ac)
+
+plot(large_corridors)
+```
+
+```{r}
+cougar_sub <- cougars %>% 
+  select(elev_mean)
+```
+
+in ggplot:
+```{r}
+ggplot(data = cougar_sub) +
+  geom_sf(aes(fill = elev_mean), 
+          color = NA)
+```
+
+```{r}
+tmap_mode("view")
+
+tm_shape(cougar_sub) +
+  tm_fill("elev_mean")
+```
+
